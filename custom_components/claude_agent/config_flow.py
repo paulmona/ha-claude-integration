@@ -1,0 +1,52 @@
+"""Config flow for Claude Agent integration."""
+
+import aiohttp
+import voluptuous as vol
+
+from homeassistant import config_entries
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .const import DOMAIN, CONF_SERVER_URL, DEFAULT_SERVER_URL
+
+
+class ClaudeAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Claude Agent."""
+
+    VERSION = 1
+
+    async def async_step_user(self, user_input=None):
+        """Handle the initial step - configure channel server URL."""
+        errors = {}
+
+        if user_input is not None:
+            server_url = user_input[CONF_SERVER_URL].rstrip("/")
+
+            # Test the connection
+            try:
+                session = async_get_clientsession(self.hass)
+                async with session.get(
+                    f"{server_url}/health",
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("status") == "ok":
+                            return self.async_create_entry(
+                                title="Claude Agent",
+                                data={CONF_SERVER_URL: server_url},
+                            )
+                    errors["base"] = "cannot_connect"
+            except (aiohttp.ClientError, TimeoutError):
+                errors["base"] = "cannot_connect"
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_SERVER_URL, default=DEFAULT_SERVER_URL
+                    ): str,
+                }
+            ),
+            errors=errors,
+        )

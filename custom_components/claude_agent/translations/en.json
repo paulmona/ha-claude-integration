@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Claude Agent",
+        "description": "Connect to a Claude Code agent's channel server.",
+        "data": {
+          "server_url": "Channel Server URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to channel server. Check the URL and ensure the agent container is running."
+    }
+  }
+}
