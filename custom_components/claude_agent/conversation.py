@@ -12,7 +12,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers import intent
+from homeassistant.helpers import (
+    device_registry as dr,
+    area_registry as ar,
+    entity_registry as er,
+    intent,
+)
 
 from .const import DOMAIN, CONF_SERVER_URL
 
@@ -51,6 +56,39 @@ class ClaudeConversationEntity(ConversationEntity):
         """Return supported languages."""
         return ["en"]
 
+    def _get_exposed_entities(self) -> list[dict]:
+        """Get entities exposed to conversation agents with their current state."""
+        entity_registry = er.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
+        exposed = []
+
+        for entity_entry in entity_registry.entities.values():
+            # Check if entity is exposed to conversation agents
+            options = entity_entry.options.get("conversation", {})
+            if not options.get("should_expose", False):
+                continue
+
+            state = self.hass.states.get(entity_entry.entity_id)
+            if state is None:
+                continue
+
+            # Get area name if available
+            area_name = None
+            if entity_entry.area_id:
+                area = area_registry.async_get_area(entity_entry.area_id)
+                if area:
+                    area_name = area.name
+
+            exposed.append({
+                "entity_id": entity_entry.entity_id,
+                "name": entity_entry.name or entity_entry.original_name or entity_entry.entity_id,
+                "state": state.state,
+                "domain": entity_entry.domain,
+                "area": area_name,
+            })
+
+        return exposed
+
     async def async_process(self, user_input: ConversationInput) -> ConversationResult:
         """Process a voice input - send to channel server and return response."""
         text = user_input.text
@@ -60,15 +98,18 @@ class ClaudeConversationEntity(ConversationEntity):
         area_name = None
 
         if user_input.device_id:
-            device_registry = self.hass.helpers.device_registry.async_get(self.hass)
+            device_registry = dr.async_get(self.hass)
             device = device_registry.async_get(user_input.device_id)
             if device:
                 device_name = device.name_by_user or device.name
                 if device.area_id:
-                    area_registry = self.hass.helpers.area_registry.async_get(self.hass)
+                    area_registry = ar.async_get(self.hass)
                     area = area_registry.async_get_area(device.area_id)
                     if area:
                         area_name = area.name
+
+        # Get exposed entities for the agent
+        exposed_entities = self._get_exposed_entities()
 
         payload = {
             "type": "voice",
@@ -76,6 +117,7 @@ class ClaudeConversationEntity(ConversationEntity):
             "text": text,
             "device": device_name,
             "area": area_name,
+            "entities": exposed_entities,
         }
 
         _LOGGER.debug("Sending to channel server: %s", payload)
