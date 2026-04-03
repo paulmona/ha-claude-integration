@@ -2,7 +2,7 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 
-A Home Assistant custom integration that connects HA voice assistants to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents running in [The Hive](https://github.com/paulmona/thehive). Talk to your AI assistant through any HA voice device, and it can control your smart home, answer questions, and run complex workflows.
+A Home Assistant custom integration that connects HA voice assistants to a long-running [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) process running in [The Hive](https://github.com/paulmona/thehive). The Hive runs Claude Code CLI as a persistent agent inside a Docker container. This integration bridges Home Assistant voice to that agent, letting you control your smart home, answer questions, and run complex workflows by voice.
 
 ## Important: Cloud-Based AI
 
