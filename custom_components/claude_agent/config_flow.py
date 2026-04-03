@@ -1,6 +1,7 @@
 """Config flow for Claude Agent integration."""
 
 import aiohttp
+from urllib.parse import urlparse
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -20,6 +21,22 @@ class ClaudeAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             server_url = user_input[CONF_SERVER_URL].rstrip("/")
+
+            # Validate URL scheme
+            parsed = urlparse(server_url)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                errors["base"] = "invalid_url"
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_SERVER_URL, default=server_url
+                            ): str,
+                        }
+                    ),
+                    errors=errors,
+                )
 
             # Test the connection
             try:
