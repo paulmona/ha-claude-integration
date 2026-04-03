@@ -9,10 +9,14 @@ A Home Assistant custom integration that connects HA voice assistants to [Claude
 This integration uses **Anthropic's Claude** as the AI backend. It is **not local** - voice requests are processed by Claude's cloud API.
 
 **You will need:**
-- A [Claude account](https://claude.ai) with an active subscription
+- A [Claude account](https://claude.ai) with an active subscription (Pro, Team, or Enterprise)
+- A Docker container running an agent from [The Hive](https://github.com/paulmona/thehive)
+- An agent config from [The Hive Agent Sample](https://github.com/paulmona/hive-agent-sample)
 - Claude Code authenticates via OAuth on first run - no API key needed
 
 **What you get in return:** Claude is a full-featured AI with tool use. Any integrations you've connected to your Claude account (email, calendar, Notion, etc.) are available to your voice agent. Your agent isn't limited to smart home commands - it can check your calendar, send emails, search the web, and run multi-step workflows, all by voice.
+
+If you want additional tools or capabilities available to the agent, fork [The Hive](https://github.com/paulmona/thehive) repo and modify the Dockerfile to include whatever you need.
 
 ## How It Works
 
@@ -34,14 +38,21 @@ The voice endpoint (ha-voice) is built into [The Hive](https://github.com/paulmo
 
 ## Permissions and Security
 
-The agent runs with `--dangerously-skip-permissions` ("yolo mode") because there is no way to approve tool calls via voice. This is safe because:
+The agent runs with `--dangerously-skip-permissions` ("yolo mode") because there is no way to approve tool calls via voice. This is mostly safe because:
 
 - The container is hardened: no package managers at runtime, non-root user, resource limits
 - The agent can only control HA devices you explicitly expose
 - All agent behavior is governed by its CLAUDE.md and agent definition files
 - The agent runs in an isolated Docker container with a persistent but sandboxed home directory
+- Worst case, Claude could crash its own container - it cannot affect the host or other containers
 
 If you're uncomfortable with this, review the [security model](https://github.com/paulmona/thehive#security) in The Hive docs.
+
+## Limitations
+
+- **Channel acknowledgement on every restart** - The Hive uses Claude Code's preview "channels" feature for voice input. This requires manually acknowledging a prompt on every container restart by attaching to the container (`docker attach <container-name>`). This is an Anthropic limitation that will likely be removed in a future release.
+- **No proactive HA control** - The agent can currently only control Home Assistant devices in response to voice requests. It cannot independently send commands to HA via MQTT or other channels (e.g. "turn on the porch light at sunset"). This is planned for a future release.
+- **Cloud dependency** - All voice processing goes through Claude's cloud API. No internet, no agent.
 
 ## Prerequisites
 
