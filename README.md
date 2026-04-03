@@ -129,6 +129,10 @@ For agent personality and voice response guidelines, see the [sample agent confi
 
 **Agent can't control devices** - Make sure the devices are exposed in HA's Voice Assistants settings. The agent can only see and control entities you explicitly expose.
 
+## Created By
+
+Built by [ViewBridge AI](https://viewbridge.ai) - AI consulting and development for businesses.
+
 ## License
 
 MIT - See [LICENSE](LICENSE) for details.
