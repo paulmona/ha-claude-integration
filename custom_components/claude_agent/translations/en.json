@@ -10,7 +10,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Cannot connect to channel server. Check the URL and ensure the agent container is running."
+      "cannot_connect": "Cannot connect to channel server. Check the URL and ensure the agent container is running.",
+      "invalid_url": "Invalid URL. Please enter a valid http:// or https:// URL."
     }
   }
 }

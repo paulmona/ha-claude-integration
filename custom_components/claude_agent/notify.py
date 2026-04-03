@@ -29,7 +29,11 @@ async def async_get_service(
     if discovery_info is None:
         return None
 
-    entry_id = discovery_info["entry_id"]
+    entry_id = discovery_info.get("entry_id")
+    if not entry_id or entry_id not in hass.data.get(DOMAIN, {}):
+        _LOGGER.error("Invalid or missing entry_id in discovery_info")
+        return None
+
     entry_data = hass.data[DOMAIN][entry_id]
     return ClaudeNotifyService(hass, entry_data[CONF_SERVER_URL])
 
