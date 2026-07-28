@@ -5,15 +5,28 @@ from urllib.parse import urlparse
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, CONF_SERVER_URL, DEFAULT_SERVER_URL
+from .const import (
+    DOMAIN,
+    CONF_SERVER_URL,
+    DEFAULT_SERVER_URL,
+    CONF_FAST_PATH_SECONDS,
+    DEFAULT_FAST_PATH_SECONDS,
+)
 
 
 class ClaudeAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Claude Agent."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Return the options flow handler."""
+        return ClaudeAgentOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step - configure channel server URL."""
@@ -66,4 +79,28 @@ class ClaudeAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+
+class ClaudeAgentOptionsFlow(config_entries.OptionsFlow):
+    """Handle tuning of the response deadline after setup."""
+
+    async def async_step_init(self, user_input=None):
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self.config_entry.options.get(
+            CONF_FAST_PATH_SECONDS, DEFAULT_FAST_PATH_SECONDS
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_FAST_PATH_SECONDS, default=current
+                    ): vol.All(vol.Coerce(int), vol.Range(min=3, max=120)),
+                }
+            ),
         )

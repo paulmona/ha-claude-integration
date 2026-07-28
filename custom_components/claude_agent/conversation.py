@@ -19,12 +19,18 @@ from homeassistant.helpers import (
     intent,
 )
 
-from .const import DOMAIN, CONF_SERVER_URL
+from .const import (
+    DOMAIN,
+    CONF_SERVER_URL,
+    CONF_FAST_PATH_SECONDS,
+    DEFAULT_FAST_PATH_SECONDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-# Timeout for waiting on agent response (agents may use tools, think, etc.)
-RESPONSE_TIMEOUT = 120
+# Grace on top of the agent's deadline so the channel server's own timeout
+# fires first and we get its error rather than a bare client disconnect.
+HTTP_GRACE_SECONDS = 5
 
 
 async def async_setup_entry(
@@ -52,6 +58,13 @@ class ClaudeConversationEntity(ConversationEntity):
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}"
 
     @property
+    def _fast_path_seconds(self) -> int:
+        """Seconds the agent has to answer before this turn is abandoned."""
+        return self.entry.options.get(
+            CONF_FAST_PATH_SECONDS, DEFAULT_FAST_PATH_SECONDS
+        )
+
+    @property
     def supported_languages(self) -> list[str]:
         """Return supported languages."""
         return ["en"]
@@ -60,6 +73,7 @@ class ClaudeConversationEntity(ConversationEntity):
         """Get entities exposed to conversation agents with their current state."""
         entity_registry = er.async_get(self.hass)
         area_registry = ar.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
         exposed = []
 
         for entity_entry in entity_registry.entities.values():
@@ -72,10 +86,17 @@ class ClaudeConversationEntity(ConversationEntity):
             if state is None:
                 continue
 
-            # Get area name if available
+            # Most entities inherit their area from their device rather than
+            # carrying area_id themselves, so fall back to the device.
+            area_id = entity_entry.area_id
+            if area_id is None and entity_entry.device_id:
+                device = device_registry.async_get(entity_entry.device_id)
+                if device:
+                    area_id = device.area_id
+
             area_name = None
-            if entity_entry.area_id:
-                area = area_registry.async_get_area(entity_entry.area_id)
+            if area_id:
+                area = area_registry.async_get_area(area_id)
                 if area:
                     area_name = area.name
 
@@ -88,6 +109,41 @@ class ClaudeConversationEntity(ConversationEntity):
             })
 
         return exposed
+
+    def _resolve_satellite(self, device_id: str | None) -> str | None:
+        """Find the assist_satellite entity for the device that made the request."""
+        if not device_id:
+            return None
+        entity_registry = er.async_get(self.hass)
+        for entry in er.async_entries_for_device(entity_registry, device_id):
+            if entry.domain == "assist_satellite":
+                return entry.entity_id
+        return None
+
+    async def _request_response(self, payload: dict) -> tuple[str, bool]:
+        """POST to the channel server, return (spoken response, keep listening)."""
+        _LOGGER.debug("Sending to channel server: %s", payload)
+        http_timeout = payload["deadline_seconds"] + HTTP_GRACE_SECONDS
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.post(
+                f"{self._server_url}/message",
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=http_timeout),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    response_text = data.get("response", "I didn't get a response.")
+                    _LOGGER.debug("Received response: %s", response_text)
+                    return response_text, bool(data.get("continue_conversation"))
+                _LOGGER.error("Channel server error: %s %s", resp.status, await resp.text())
+                return "Sorry, the agent is not responding.", False
+        except TimeoutError:
+            _LOGGER.error("Channel server timeout after %ds", http_timeout)
+            return "Sorry, the agent is taking too long to respond.", False
+        except aiohttp.ClientError as err:
+            _LOGGER.error("Channel server connection error: %s", err)
+            return "Sorry, I cannot reach the agent.", False
 
     async def async_process(self, user_input: ConversationInput) -> ConversationResult:
         """Process a voice input - send to channel server and return response."""
@@ -118,34 +174,19 @@ class ClaudeConversationEntity(ConversationEntity):
             "device": device_name,
             "area": area_name,
             "entities": exposed_entities,
+            # Lets the agent choose between answering inline and acknowledging
+            # now, then announcing the real answer via ha/tts/speak.
+            "deadline_seconds": self._fast_path_seconds,
+            "satellite": self._resolve_satellite(user_input.device_id),
+            "conversation_id": user_input.conversation_id,
         }
 
-        _LOGGER.debug("Sending to channel server: %s", payload)
-
-        try:
-            session = async_get_clientsession(self.hass)
-            async with session.post(
-                f"{self._server_url}/message",
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=RESPONSE_TIMEOUT),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    response_text = data.get("response", "I didn't get a response.")
-                    _LOGGER.debug("Received response: %s", response_text)
-                else:
-                    response_text = "Sorry, the agent is not responding."
-                    _LOGGER.error("Channel server error: %s %s", resp.status, await resp.text())
-        except TimeoutError:
-            response_text = "Sorry, the agent is taking too long to respond."
-            _LOGGER.error("Channel server timeout after %ds", RESPONSE_TIMEOUT)
-        except aiohttp.ClientError as err:
-            response_text = "Sorry, I cannot reach the agent."
-            _LOGGER.error("Channel server connection error: %s", err)
+        response_text, continue_conversation = await self._request_response(payload)
 
         response = intent.IntentResponse(language=user_input.language)
         response.async_set_speech(response_text)
         return ConversationResult(
             response=response,
             conversation_id=user_input.conversation_id,
+            continue_conversation=continue_conversation,
         )
