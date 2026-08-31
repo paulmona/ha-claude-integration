@@ -100,13 +100,39 @@ class ClaudeConversationEntity(ConversationEntity):
                 if area:
                     area_name = area.name
 
-            exposed.append({
+            entry = {
                 "entity_id": entity_entry.entity_id,
                 "name": entity_entry.name or entity_entry.original_name or entity_entry.entity_id,
                 "state": state.state,
                 "domain": entity_entry.domain,
                 "area": area_name,
-            })
+            }
+
+            # A script is the one exposed entity that takes arguments, and the
+            # agent has no other way to learn their names. Without this it sees
+            # only "script.set_alarm (script, off)" and has to guess what to
+            # pass, which silently produces a script run that does nothing.
+            if entity_entry.domain == "script":
+                description = state.attributes.get("description")
+                if description:
+                    entry["description"] = description
+
+                fields = state.attributes.get("fields") or {}
+                if fields:
+                    entry["fields"] = {
+                        name: {
+                            k: v
+                            for k, v in (
+                                ("description", spec.get("description")),
+                                ("example", spec.get("example")),
+                                ("required", spec.get("required")),
+                            )
+                            if v is not None
+                        }
+                        for name, spec in fields.items()
+                    }
+
+            exposed.append(entry)
 
         return exposed
 
