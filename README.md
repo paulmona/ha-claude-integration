@@ -2,7 +2,14 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 
-A Home Assistant custom integration that connects HA voice assistants to a long-running [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) process running in [The Hive](https://github.com/paulmona/thehive). The Hive runs Claude Code CLI as a persistent agent inside a Docker container. This integration bridges Home Assistant voice to that agent, letting you control your smart home, answer questions, and run complex workflows by voice.
+A Home Assistant custom integration that connects HA voice assistants to a long-running [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) agent, letting you control your smart home, answer questions, and run complex workflows by voice.
+
+The repository has both halves:
+
+- `custom_components/claude_agent/`: the Home Assistant integration (installed through HACS)
+- `ha-voice/`: the voice endpoint, a small Node.js MCP channel server that runs next to the Claude Code agent, receives requests from Home Assistant, and pushes them into the agent's session
+
+It is in daily use in [hive](https://github.com/paulmona/hive), a fleet of Claude Code agents where the coordinator agent handles voice across the house.
 
 ## Important: Cloud-Based AI
 
@@ -10,18 +17,16 @@ This integration uses **Anthropic's Claude** as the AI backend. It is **not loca
 
 **You will need:**
 - A [Claude account](https://claude.ai) with an active subscription (Pro, Team, or Enterprise)
-- A Docker container running an agent from [The Hive](https://github.com/paulmona/thehive)
-- An agent config from [The Hive Agent Sample](https://github.com/paulmona/hive-agent-sample)
+- A host running Claude Code as a long-lived process, with `ha-voice` from this repo
 - Claude Code authenticates via OAuth on first run - no API key needed
 
 **What you get in return:** Claude is a full-featured AI with tool use. Any integrations you've connected to your Claude account (email, calendar, Notion, etc.) are available to your voice agent. Your agent isn't limited to smart home commands - it can check your calendar, send emails, search the web, and run multi-step workflows, all by voice.
 
-If you want additional tools or capabilities available to the agent, fork [The Hive](https://github.com/paulmona/thehive) repo and modify the Dockerfile to include whatever you need.
 
 ## How It Works
 
 ```
-Voice Device -> Home Assistant -> Claude Agent Integration -> Hive Agent (Docker)
+Voice Device -> Home Assistant -> Claude Agent Integration -> ha-voice + Claude Code
                                        |                          |
                                   HTTP POST to               Processes request,
                                   ha-voice endpoint           controls devices,
@@ -30,27 +35,24 @@ Voice Device -> Home Assistant -> Claude Agent Integration -> Hive Agent (Docker
 
 1. You speak to a Home Assistant voice device (phone, tablet, smart speaker)
 2. HA routes the text to this integration's conversation entity
-3. The integration sends the text + exposed device list to the Hive agent's ha-voice endpoint
+3. The integration sends the text + exposed device list to the agent's ha-voice endpoint
 4. The agent processes the request (can control devices, check data, run skills)
 5. The response is spoken back through the voice device
 
-The voice endpoint (ha-voice) is built into [The Hive](https://github.com/paulmona/thehive) Docker image. You only need a single container running your agent - the voice server, MQTT, and memory are all included.
+`ha-voice` holds each HTTP request open until the agent answers through its `ha_voice_reply` tool, and gives the agent an `ha_call_service` tool limited to the entities listed in that request.
 
 ## Permissions and Security
 
-The agent runs with `--dangerously-skip-permissions` ("yolo mode") because there is no way to approve tool calls via voice. This is mostly safe because:
+The agent runs with `--dangerously-skip-permissions` because there is no way to approve a tool call by voice. That makes the agent's instructions and the host the controls, so:
 
-- The container is hardened: no package managers at runtime, non-root user, resource limits
-- The agent can only control HA devices you explicitly expose
-- All agent behavior is governed by its CLAUDE.md and agent definition files
-- The agent runs in an isolated Docker container with a persistent but sandboxed home directory
-- Worst case, Claude could crash its own container - it cannot affect the host or other containers
-
-If you're uncomfortable with this, review the [security model](https://github.com/paulmona/thehive#security) in The Hive docs.
+- **Run the agent as a dedicated, unprivileged user.** It should not be able to change the host or read other users' files.
+- **Expose only the entities you want voice to control.** `ha_call_service` is limited to the entities Home Assistant sends with each request.
+- **Use a Home Assistant token scoped to what the agent needs.**
+- **Write the agent's rules down.** Its CLAUDE.md and agent definition are the only brake on what it does with its other tools.
 
 ## Limitations
 
-- **Channel acknowledgement on every restart** - The Hive uses Claude Code's preview "channels" feature for voice input. This requires manually acknowledging a prompt on every container restart by attaching to the container (`docker attach <container-name>`). This is an Anthropic limitation that will likely be removed in a future release.
+- **Channel acknowledgement on every restart** - `ha-voice` uses Claude Code's preview "channels" feature, loaded with `--dangerously-load-development-channels`. Claude Code asks for confirmation on every start, so someone (or a small script, as in [hive](https://github.com/paulmona/hive/blob/main/tools/dev-channels-watcher)) has to answer it.
 - **No proactive HA control** - The agent can currently only control Home Assistant devices in response to voice requests. It cannot independently send commands to HA via MQTT or other channels (e.g. "turn on the porch light at sunset"). This is planned for a future release.
 - **Cloud dependency** - All voice processing goes through Claude's cloud API. No internet, no agent.
 
@@ -58,8 +60,7 @@ If you're uncomfortable with this, review the [security model](https://github.co
 
 - **Home Assistant** 2024.1.0 or later
 - **A Claude account** with an active subscription (Pro, Team, or Enterprise)
-- **[The Hive](https://github.com/paulmona/thehive)** - one Docker container running your agent with `HA_URL` and `HA_TOKEN` configured
-- **[Agent config](https://github.com/paulmona/hive-agent-sample)** deployed to your Hive agent
+- **Claude Code** running as a long-lived process (for example in tmux under systemd), with Node.js 18+ for `ha-voice`
 
 ## Installation
 
@@ -80,7 +81,7 @@ If you're uncomfortable with this, review the [security model](https://github.co
 
 1. Go to **Settings > Devices & Services > Add Integration**
 2. Search for "Claude Agent"
-3. Enter the URL of your Hive agent's ha-voice endpoint (default: `http://127.0.0.1:8790`)
+3. Enter the URL of your agent's ha-voice endpoint (default: `http://127.0.0.1:8790`)
 
 ## Exposing Devices
 
@@ -106,24 +107,33 @@ This is useful for wiring the agent into your existing automations. For example,
 
 ## Using MQTT for Automations
 
-The sample agent config includes MQTT support for inter-agent messaging. You can also use MQTT to send commands to your agent from HA automations, Node-RED, or other systems. Configure `MQTT_BROKER_URL` in your Hive agent's environment to enable this.
+If the agent also loads an MQTT channel (for example [claude-code-mqtt](https://github.com/mattstein111/claude-code-mqtt)), HA automations, Node-RED, or other systems can send it commands over MQTT too.
 
-## Hive Agent Setup
+## Voice Endpoint Setup
 
-Your Hive agent needs the ha-voice endpoint enabled. In your agent's Vault config (or env vars):
+On the host that runs Claude Code:
+
+```bash
+cd ha-voice && npm ci
+claude mcp add -s user ha-voice -- node /path/to/ha-voice/ha-voice.js
+claude --dangerously-skip-permissions --dangerously-load-development-channels server:ha-voice
+```
+
+`ha-voice` reads its settings from the environment Claude Code is started with:
 
 | Variable | Description |
 |---|---|
 | `HA_URL` | Your Home Assistant URL (e.g. `http://192.168.1.100:8123`) |
 | `HA_TOKEN` | A Home Assistant long-lived access token |
+| `HA_VOICE_PORT` | Listen port, default `8790` |
 
-The agent's container needs port 8790 exposed and reachable from Home Assistant.
+Port 8790 must be reachable from Home Assistant.
 
-For agent personality and voice response guidelines, see the [sample agent config](https://github.com/paulmona/hive-agent-sample).
+For an example of agent instructions written for voice (short, spoken, no markdown), see Sunday's [CLAUDE.md](https://github.com/paulmona/hive/blob/main/agents/sunday/CLAUDE.md) in hive.
 
 ## Troubleshooting
 
-**"Sorry, I cannot reach the agent"** - Check that the Hive container is running and port 8790 is accessible from HA. Test with `curl http://<agent-host>:8790/health`.
+**"Sorry, I cannot reach the agent"** - Check that the agent is running with `ha-voice` loaded and port 8790 is accessible from HA. Test with `curl http://<agent-host>:8790/health`.
 
 **"Sorry, the agent is taking too long to respond"** - The default timeout is 120 seconds. Complex requests (tool use, API calls) can take time. Check the agent's logs.
 
