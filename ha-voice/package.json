@@ -1,0 +1,12 @@
+{
+  "name": "ha-voice-endpoint",
+  "version": "0.1.0",
+  "description": "HTTP voice endpoint for Home Assistant Assist integration",
+  "type": "module",
+  "scripts": {
+    "start": "node ha-voice.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
