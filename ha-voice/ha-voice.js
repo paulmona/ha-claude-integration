@@ -369,6 +369,7 @@ const httpServer = createServer(async (req, res) => {
           clearTimeout(timer);
           resolve(response);
         },
+        cancel: () => clearTimeout(timer),
       });
     });
 
@@ -387,6 +388,10 @@ const httpServer = createServer(async (req, res) => {
         },
       });
     } catch (e) {
+      // The timer would otherwise reject later with nobody awaiting, and an
+      // unhandled rejection kills the process.
+      pending.get(requestId)?.cancel();
+      pending.delete(requestId);
       log(`Failed to push notification: ${e}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Failed to reach agent' }));
@@ -403,6 +408,47 @@ const httpServer = createServer(async (req, res) => {
       res.writeHead(504, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Agent did not respond in time' }));
     }
+    return;
+  }
+
+  // One-way event from notify.claude_agent. Nothing waits for a reply.
+  if (req.method === 'POST' && req.url === '/event') {
+    let body;
+    try {
+      body = await parseBody(req);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      return;
+    }
+
+    const message = body.message || '';
+    const eventData = body.event_data ?? {};
+    log(`[event] ${message}`);
+
+    let content = [
+      '[HA automation event. Nobody is listening for a spoken reply; act on it or not as you see fit.]',
+      '',
+      message,
+    ].join('\n');
+    if (Object.keys(eventData).length > 0) {
+      content += `\n\n[Event data]\n${JSON.stringify(eventData, null, 2)}`;
+    }
+
+    try {
+      await mcp.notification({
+        method: 'notifications/claude/channel',
+        params: { content, meta: { source: body.source || 'ha-automation' } },
+      });
+    } catch (e) {
+      log(`Failed to push event: ${e}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to reach agent' }));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'delivered' }));
     return;
   }
 
