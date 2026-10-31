@@ -24,6 +24,7 @@ from .const import (
     CONF_SERVER_URL,
     CONF_FAST_PATH_SECONDS,
     DEFAULT_FAST_PATH_SECONDS,
+    auth_headers,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -155,6 +156,7 @@ class ClaudeConversationEntity(ConversationEntity):
             async with session.post(
                 f"{self._server_url}/message",
                 json=payload,
+                headers=auth_headers(self.entry),
                 timeout=aiohttp.ClientTimeout(total=http_timeout),
             ) as resp:
                 if resp.status == 200:

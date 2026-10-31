@@ -6,12 +6,14 @@
  * pushes it into Claude's context as a channel event, and waits for
  * Claude to respond via the ha_voice_reply tool.
  *
- * Endpoints:
+ * Endpoints (all require Authorization: Bearer <HA_VOICE_TOKEN>):
  *   POST /message  - voice input from HA Assist (waits for agent response)
+ *   POST /event    - one-way event from notify.claude_agent
  *   GET  /health   - health check for HA config validation
  *
  * Environment:
  *   HA_VOICE_PORT  - listen port (default: 8790)
+ *   HA_VOICE_TOKEN - shared secret HA sends with every request (required)
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -21,12 +23,33 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { createServer } from 'http';
+import { createHash, timingSafeEqual } from 'crypto';
 
 const PORT = parseInt(process.env.HA_VOICE_PORT || '8790', 10);
 // Fallback only. HA sends deadline_seconds per request; that value wins.
 const DEFAULT_TIMEOUT_MS = 60_000;
 const HA_URL = process.env.HA_URL || ''; // e.g. http://<ha-host>:8123
 const HA_TOKEN = process.env.HA_TOKEN || ''; // Long-lived access token
+const VOICE_TOKEN = process.env.HA_VOICE_TOKEN || '';
+
+// Anyone who can reach the port can speak to an agent running without
+// permission prompts, so there is no unauthenticated mode.
+if (!VOICE_TOKEN) {
+  process.stderr.write('[ha-voice] HA_VOICE_TOKEN is not set; refusing to start\n');
+  process.exit(1);
+}
+const voiceTokenDigest = createHash('sha256').update(VOICE_TOKEN).digest();
+
+// Hashing first makes the comparison constant-time regardless of length.
+function authorized(req) {
+  const match = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+  if (!match) return false;
+  return timingSafeEqual(createHash('sha256').update(match[1]).digest(), voiceTokenDigest);
+}
+
+// Keys that would retarget a service call away from the entity that was
+// checked against the exposed list.
+const TARGET_KEYS = ['entity_id', 'device_id', 'area_id', 'floor_id', 'label_id'];
 
 const log = (msg) => process.stderr.write(`[ha-voice] ${msg}\n`);
 
@@ -205,9 +228,25 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       };
     }
 
+    const entityDomain = entity_id.split('.')[0];
+    if (domain !== entityDomain && domain !== 'homeassistant') {
+      return {
+        content: [{ type: 'text', text: `Service domain ${domain} does not match ${entity_id}. Use ${entityDomain} or homeassistant.` }],
+        isError: true,
+      };
+    }
+
+    const retarget = TARGET_KEYS.filter((k) => k in (service_data || {}));
+    if (retarget.length > 0) {
+      return {
+        content: [{ type: 'text', text: `service_data may not contain ${retarget.join(', ')}; pass the target as entity_id.` }],
+        isError: true,
+      };
+    }
+
     // Call HA REST API
     const url = `${HA_URL}/api/services/${domain}/${service}`;
-    const payload = { entity_id, ...(service_data || {}) };
+    const payload = { ...(service_data || {}), entity_id };
 
     try {
       const resp = await fetch(url, {
@@ -273,14 +312,10 @@ let requestCounter = 0;
 const startedAt = Date.now().toString(36);
 
 const httpServer = createServer(async (req, res) => {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
+  // No CORS headers: the only client is Home Assistant, not a browser.
+  if (!authorized(req)) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Unauthorized' }));
     return;
   }
 

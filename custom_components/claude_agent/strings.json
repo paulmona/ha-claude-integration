@@ -5,13 +5,15 @@
         "title": "Claude Agent",
         "description": "Connect to a Claude Code agent's channel server.",
         "data": {
-          "server_url": "Channel Server URL"
+          "server_url": "Channel Server URL",
+          "auth_token": "Access token (must match HA_VOICE_TOKEN on the agent host)"
         }
       }
     },
     "error": {
       "cannot_connect": "Cannot connect to channel server. Check the URL and ensure the agent container is running.",
-      "invalid_url": "Invalid URL. Please enter a valid http:// or https:// URL."
+      "invalid_url": "Invalid URL. Please enter a valid http:// or https:// URL.",
+      "invalid_auth": "The channel server rejected the access token. It must match HA_VOICE_TOKEN on the agent host."
     }
   },
   "options": {
@@ -20,7 +22,8 @@
         "title": "Claude Agent options",
         "description": "How long the agent has to answer before the voice satellite gives up. The agent is told this value and uses it to decide whether to answer inline or acknowledge now and announce the result later.",
         "data": {
-          "fast_path_seconds": "Response deadline (seconds)"
+          "fast_path_seconds": "Response deadline (seconds)",
+          "auth_token": "Access token (must match HA_VOICE_TOKEN on the agent host)"
         }
       }
     }

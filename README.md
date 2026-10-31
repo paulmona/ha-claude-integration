@@ -46,7 +46,8 @@ Voice Device -> Home Assistant -> Claude Agent Integration -> ha-voice + Claude 
 The agent runs with `--dangerously-skip-permissions` because there is no way to approve a tool call by voice. That makes the agent's instructions and the host the controls, so:
 
 - **Run the agent as a dedicated, unprivileged user.** It should not be able to change the host or read other users' files.
-- **Expose only the entities you want voice to control.** `ha_call_service` is limited to the entities Home Assistant sends with each request.
+- **Set a shared access token.** `ha-voice` refuses to start without `HA_VOICE_TOKEN` and rejects any request that does not carry it, so other hosts and web pages on your network cannot talk to the agent.
+- **Expose only the entities you want voice to control.** `ha_call_service` is limited to the entities Home Assistant sends with each request, and to services in that entity's own domain (or `homeassistant`).
 - **Use a Home Assistant token scoped to what the agent needs.**
 - **Write the agent's rules down.** Its CLAUDE.md and agent definition are the only brake on what it does with its other tools.
 
@@ -82,6 +83,7 @@ The agent runs with `--dangerously-skip-permissions` because there is no way to 
 1. Go to **Settings > Devices & Services > Add Integration**
 2. Search for "Claude Agent"
 3. Enter the URL of your agent's ha-voice endpoint (default: `http://127.0.0.1:8790`)
+4. Enter the access token, the same value as `HA_VOICE_TOKEN` on the agent host. Change it later under the integration's **Configure** options.
 
 ## Exposing Devices
 
@@ -126,14 +128,15 @@ claude --dangerously-skip-permissions --dangerously-load-development-channels se
 | `HA_URL` | Your Home Assistant URL (e.g. `http://192.168.1.100:8123`) |
 | `HA_TOKEN` | A Home Assistant long-lived access token |
 | `HA_VOICE_PORT` | Listen port, default `8790` |
+| `HA_VOICE_TOKEN` | Required. Shared secret Home Assistant sends as a bearer token. Generate one with `openssl rand -hex 32` |
 
-Port 8790 must be reachable from Home Assistant.
+Port 8790 must be reachable from Home Assistant. Limit it to Home Assistant's address with a host firewall if you can.
 
 For an example of agent instructions written for voice (short, spoken, no markdown), see Sunday's [CLAUDE.md](https://github.com/paulmona/hive/blob/main/agents/sunday/CLAUDE.md) in hive.
 
 ## Troubleshooting
 
-**"Sorry, I cannot reach the agent"** - Check that the agent is running with `ha-voice` loaded and port 8790 is accessible from HA. Test with `curl http://<agent-host>:8790/health`.
+**"Sorry, I cannot reach the agent"** - Check that the agent is running with `ha-voice` loaded and port 8790 is accessible from HA. Test with `curl -H "Authorization: Bearer $HA_VOICE_TOKEN" http://<agent-host>:8790/health`.
 
 **"Sorry, the agent is taking too long to respond"** - The default timeout is 120 seconds. Complex requests (tool use, API calls) can take time. Check the agent's logs.
 
