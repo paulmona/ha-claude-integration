@@ -34,8 +34,8 @@ const VOICE_TOKEN = process.env.HA_VOICE_TOKEN || '';
 
 // Anyone who can reach the port can speak to an agent running without
 // permission prompts, so there is no unauthenticated mode.
-if (!VOICE_TOKEN) {
-  process.stderr.write('[ha-voice] HA_VOICE_TOKEN is not set; refusing to start\n');
+if (VOICE_TOKEN.length < 32) {
+  process.stderr.write('[ha-voice] HA_VOICE_TOKEN must be at least 32 characters; refusing to start\n');
   process.exit(1);
 }
 const voiceTokenDigest = createHash('sha256').update(VOICE_TOKEN).digest();

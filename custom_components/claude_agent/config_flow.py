@@ -17,6 +17,9 @@ from .const import (
     CONF_AUTH_TOKEN,
 )
 
+# Matches ha-voice, which refuses to start with a shorter HA_VOICE_TOKEN.
+TOKEN_SCHEMA = vol.All(str, vol.Length(min=32))
+
 
 class ClaudeAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Claude Agent."""
@@ -54,7 +57,7 @@ class ClaudeAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_SERVER_URL, default=server_url): str,
-                    vol.Required(CONF_AUTH_TOKEN): str,
+                    vol.Required(CONF_AUTH_TOKEN): TOKEN_SCHEMA,
                 }
             ),
             errors=errors,
@@ -99,7 +102,7 @@ class ClaudeAgentOptionsFlow(config_entries.OptionsFlow):
                     vol.Required(
                         CONF_FAST_PATH_SECONDS, default=current
                     ): vol.All(vol.Coerce(int), vol.Range(min=3, max=120)),
-                    vol.Required(CONF_AUTH_TOKEN, default=token): str,
+                    vol.Required(CONF_AUTH_TOKEN, default=token): TOKEN_SCHEMA,
                 }
             ),
         )

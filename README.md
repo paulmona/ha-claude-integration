@@ -83,7 +83,7 @@ The agent runs with `--dangerously-skip-permissions` because there is no way to 
 1. Go to **Settings > Devices & Services > Add Integration**
 2. Search for "Claude Agent"
 3. Enter the URL of your agent's ha-voice endpoint (default: `http://127.0.0.1:8790`)
-4. Enter the access token, the same value as `HA_VOICE_TOKEN` on the agent host. Change it later under the integration's **Configure** options.
+4. Enter the access token, the same value as `HA_VOICE_TOKEN` on the agent host (see [Access token](#access-token)). Change it later under the integration's **Configure** options.
 
 ## Exposing Devices
 
@@ -128,9 +128,19 @@ claude --dangerously-skip-permissions --dangerously-load-development-channels se
 | `HA_URL` | Your Home Assistant URL (e.g. `http://192.168.1.100:8123`) |
 | `HA_TOKEN` | A Home Assistant long-lived access token |
 | `HA_VOICE_PORT` | Listen port, default `8790` |
-| `HA_VOICE_TOKEN` | Required. Shared secret Home Assistant sends as a bearer token. Generate one with `openssl rand -hex 32` |
+| `HA_VOICE_TOKEN` | Required. Shared secret Home Assistant sends with every request. See [Access token](#access-token) |
 
 Port 8790 must be reachable from Home Assistant. Limit it to Home Assistant's address with a host firewall if you can.
+
+### Access token
+
+`ha-voice` and the integration share one secret. Anything that can reach port 8790 without it is refused.
+
+1. Generate a random string of at least 32 characters. Any generator works, for example `openssl rand -hex 32`. Don't use a password or a phrase someone could guess.
+2. Set it as `HA_VOICE_TOKEN` in the environment Claude Code starts with, then restart the agent.
+3. Enter the same value in the integration, at setup or later under **Configure**.
+
+To rotate it, change both sides, then restart the agent.
 
 For an example of agent instructions written for voice (short, spoken, no markdown), see Sunday's [CLAUDE.md](https://github.com/paulmona/hive/blob/main/agents/sunday/CLAUDE.md) in hive.
 
