@@ -73,6 +73,8 @@ The agent runs with `--dangerously-skip-permissions` because there is no way to 
 4. Search for "Claude Agent" and install
 5. Restart Home Assistant
 
+HACS offers updates when a new release is published. Releases are tagged `vX.Y.Z` and match `version` in `manifest.json`.
+
 ### Manual
 
 1. Copy the `custom_components/claude_agent` directory into your HA `custom_components/` directory
