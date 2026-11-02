@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DOMAIN, CONF_SERVER_URL
+from .const import DOMAIN, CONF_SERVER_URL, auth_headers
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,8 +34,8 @@ async def async_get_service(
         _LOGGER.error("Invalid or missing entry_id in discovery_info")
         return None
 
-    entry_data = hass.data[DOMAIN][entry_id]
-    return ClaudeNotifyService(hass, entry_data[CONF_SERVER_URL])
+    entry = hass.config_entries.async_get_entry(entry_id)
+    return ClaudeNotifyService(hass, entry)
 
 
 async def async_setup_entry(
@@ -49,10 +49,11 @@ async def async_setup_entry(
 class ClaudeNotifyService(BaseNotificationService):
     """Send event notifications to the Claude agent via channel server."""
 
-    def __init__(self, hass: HomeAssistant, server_url: str) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the service."""
         self.hass = hass
-        self._server_url = server_url
+        self._entry = entry
+        self._server_url = entry.data[CONF_SERVER_URL]
 
     async def async_send_message(self, message: str = "", **kwargs) -> None:
         """Send a notification event to the agent.
@@ -82,6 +83,7 @@ class ClaudeNotifyService(BaseNotificationService):
             async with session.post(
                 f"{self._server_url}/event",
                 json=payload,
+                headers=auth_headers(self._entry),
                 timeout=aiohttp.ClientTimeout(total=NOTIFY_TIMEOUT),
             ) as resp:
                 if resp.status == 200:

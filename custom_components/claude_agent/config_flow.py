@@ -14,7 +14,11 @@ from .const import (
     DEFAULT_SERVER_URL,
     CONF_FAST_PATH_SECONDS,
     DEFAULT_FAST_PATH_SECONDS,
+    CONF_AUTH_TOKEN,
 )
+
+# Matches ha-voice, which refuses to start with a shorter HA_VOICE_TOKEN.
+TOKEN_SCHEMA = vol.All(str, vol.Length(min=32))
 
 
 class ClaudeAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -29,57 +33,52 @@ class ClaudeAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return ClaudeAgentOptionsFlow()
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step - configure channel server URL."""
+        """Handle the initial step - configure channel server URL and token."""
         errors = {}
+        server_url = DEFAULT_SERVER_URL
 
         if user_input is not None:
             server_url = user_input[CONF_SERVER_URL].rstrip("/")
+            token = user_input[CONF_AUTH_TOKEN]
 
-            # Validate URL scheme
             parsed = urlparse(server_url)
             if parsed.scheme not in ("http", "https") or not parsed.hostname:
                 errors["base"] = "invalid_url"
-                return self.async_show_form(
-                    step_id="user",
-                    data_schema=vol.Schema(
-                        {
-                            vol.Required(
-                                CONF_SERVER_URL, default=server_url
-                            ): str,
-                        }
-                    ),
-                    errors=errors,
-                )
-
-            # Test the connection
-            try:
-                session = async_get_clientsession(self.hass)
-                async with session.get(
-                    f"{server_url}/health",
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("status") == "ok":
-                            return self.async_create_entry(
-                                title="Claude Agent",
-                                data={CONF_SERVER_URL: server_url},
-                            )
-                    errors["base"] = "cannot_connect"
-            except (aiohttp.ClientError, TimeoutError):
-                errors["base"] = "cannot_connect"
+            else:
+                errors["base"] = await self._test_connection(server_url, token)
+                if errors["base"] is None:
+                    return self.async_create_entry(
+                        title="Claude Agent",
+                        data={CONF_SERVER_URL: server_url, CONF_AUTH_TOKEN: token},
+                    )
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_SERVER_URL, default=DEFAULT_SERVER_URL
-                    ): str,
+                    vol.Required(CONF_SERVER_URL, default=server_url): str,
+                    vol.Required(CONF_AUTH_TOKEN): TOKEN_SCHEMA,
                 }
             ),
             errors=errors,
         )
+
+    async def _test_connection(self, server_url, token):
+        """Return an error key, or None if the server accepted the token."""
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.get(
+                f"{server_url}/health",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 401:
+                    return "invalid_auth"
+                if resp.status == 200 and (await resp.json()).get("status") == "ok":
+                    return None
+        except (aiohttp.ClientError, TimeoutError):
+            pass
+        return "cannot_connect"
 
 
 class ClaudeAgentOptionsFlow(config_entries.OptionsFlow):
@@ -90,8 +89,10 @@ class ClaudeAgentOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.options.get(
-            CONF_FAST_PATH_SECONDS, DEFAULT_FAST_PATH_SECONDS
+        options = self.config_entry.options
+        current = options.get(CONF_FAST_PATH_SECONDS, DEFAULT_FAST_PATH_SECONDS)
+        token = options.get(CONF_AUTH_TOKEN) or self.config_entry.data.get(
+            CONF_AUTH_TOKEN, ""
         )
 
         return self.async_show_form(
@@ -101,6 +102,7 @@ class ClaudeAgentOptionsFlow(config_entries.OptionsFlow):
                     vol.Required(
                         CONF_FAST_PATH_SECONDS, default=current
                     ): vol.All(vol.Coerce(int), vol.Range(min=3, max=120)),
+                    vol.Required(CONF_AUTH_TOKEN, default=token): TOKEN_SCHEMA,
                 }
             ),
         )
